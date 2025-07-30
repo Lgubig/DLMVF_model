@@ -40,7 +40,7 @@ class EnhancedDNN(nn.Module):
 
 class GCNNetmuti(torch.nn.Module):
     def __init__(self, n_output=1, n_filters=32, embed_dim=128, num_features_xd=78, num_features_smile=66,
-                 num_features_xt=25, output_dim=256, dropout=0.2):
+                 num_features_xt=25, output_dim=128, dropout=0.2):
         super(GCNNetmuti, self).__init__()
         self.enhanced_dnn = EnhancedDNN(512,  output_dim)
         #药物 SMILES character CNN processing

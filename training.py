@@ -15,10 +15,7 @@ from torch_geometric.data import DataLoader
 from sklearn.model_selection import KFold
 import logging
 
-# 设置日志文件和日志格式
 
-
-# Training function at each epoch
 def train(model, device, train_loader, data_o, optimizer, epoch):
 
     print('epoch:', epoch)
@@ -68,12 +65,8 @@ def predicting(model, device, loader, data_o):
 
     print(f"Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}")
 
-    # Calculate AUC
     roc_auc = roc_auc_score(total_labels, total_probs)
-
     precision_vals, recall_vals, _ = precision_recall_curve(total_labels, total_probs)
-
-    # Ensure recall values are monotonic
     sorted_indices = np.argsort(recall_vals)
     recall_vals = recall_vals[sorted_indices]
     precision_vals = precision_vals[sorted_indices]
@@ -99,17 +92,16 @@ if __name__ == '__main__':
     TEST_BATCH_SIZE = 64
     LR = 0.0005
     LOG_INTERVAL = 40
-    NUM_EPOCHS = 15
-    NUM_RUNS = 1
+    NUM_EPOCHS = 25
+    NUM_RUNS = 5
     print('Learning rate: ', LR)
     print('Epochs: ', NUM_EPOCHS)
 
     model = modeling().to(device)
     print(f"Model is on device: {next(model.parameters()).device}")
 
-    # Prepare dataset and KFold cross-validation setup
+    
     train_data, test_data, data_o = kfoldprepare()
-    # Metrics for cross-validation
     mean_tpr = 0.0
     mean_fpr = np.linspace(0, 1, 100)
     mean_recall = np.linspace(0, 1, 100)
@@ -122,39 +114,32 @@ if __name__ == '__main__':
     roc_aucs = []
     pr_aucs = []
 
-    # Main loop for 5-fold cross-validation
+    
     for fold in range(NUM_RUNS):
         print(f"\nFold {fold + 1}/5")
-
-        # Split data into training and testing for the current fold
-
         train_loader = DataLoader(train_data[fold], batch_size=TRAIN_BATCH_SIZE, shuffle=True, drop_last=True)
         test_loader = DataLoader(test_data[fold], batch_size=TEST_BATCH_SIZE, shuffle=False, drop_last=True)
-
-        # Initialize model, loss function, and optimizer
         model = modeling().to(device)
 
         loss_fn = nn.BCELoss()  # for classification
         optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
-        # Train model for each epoch
         for epoch in range(NUM_EPOCHS):
             train(model, device, train_loader, data_o, optimizer, epoch + 1)
-            predicting(model, device, test_loader, data_o)
+        predicting(model, device, test_loader, data_o)
 
-        # Predict on the test set for the current fold
+        
         accuracy, precision, recall, f1, roc_auc, pr_auc, fpr, tpr, recall_vals, precision_vals = predicting(model,
                                                                                                              device,
                                                                                                              test_loader,
                                                                                                              data_o)
 
-        # Aggregate metrics for average calculations later
-        # 修复插值计算 - 应该按recall排序后再插值
+    
         sorted_indices = np.argsort(recall_vals)
         recall_vals_sorted = recall_vals[sorted_indices]
         precision_vals_sorted = precision_vals[sorted_indices]
 
-        # 正确的插值方向：在统一的recall点上插值precision
+        
         interpolated_precision = interp(mean_recall, recall_vals_sorted, precision_vals_sorted)
         mean_precision += interpolated_precision  # Sum the interpolated precision values for averaging later
         logging.info(f"Fold {fold + 1} Metrics:")
@@ -167,7 +152,7 @@ if __name__ == '__main__':
         f1_scores.append(f1)
         roc_aucs.append(roc_auc)
         pr_aucs.append(pr_auc)
-        # 对于ROC曲线，确保fpr是单调递增的
+
         sorted_indices_roc = np.argsort(fpr)
         fpr_sorted = fpr[sorted_indices_roc]
         tpr_sorted = tpr[sorted_indices_roc]
@@ -175,7 +160,6 @@ if __name__ == '__main__':
 
     mean_tpr[0] = 0.0
 
-    # Calculate average metrics after 5-fold cross-validation
     avg_accuracy = np.mean(accuracies)
     avg_precision = np.mean(precisions)
     avg_recall = np.mean(recalls)
@@ -186,7 +170,7 @@ if __name__ == '__main__':
     mean_tpr /= NUM_RUNS
     mean_tpr[-1] = 1.0
 
-    # Save and plot results
+    
     mean_fpr_tpr = np.vstack((mean_fpr, mean_tpr)).T
     np.savetxt('DLMVF_mean_fpr_tpr.csv', mean_fpr_tpr, delimiter=',', header='mean_fpr,mean_tpr', comments='')
     mean_recall_precision = np.vstack((mean_recall, mean_precision)).T
@@ -194,7 +178,7 @@ if __name__ == '__main__':
                header='mean_recall,mean_precision',
                comments='')
 
-    # Print average metrics
+    
     print("\nAverage Metrics after 5-Fold Cross-Validation:")
     print(f"Accuracy: {avg_accuracy:.4f}")
     print(f"Precision: {avg_precision:.4f}")
@@ -202,16 +186,3 @@ if __name__ == '__main__':
     print(f"F1 Score: {avg_f1:.4f}")
     print(f"ROC AUC: {avg_roc_auc:.4f}")
     print(f"PR AUC: {avg_pr_auc:.4f}")
-
-    # 验证CSV数据的AUC计算
-    from sklearn.metrics import auc
-    csv_roc_auc = auc(mean_fpr, mean_tpr)
-    csv_pr_auc = auc(mean_recall, mean_precision)
-
-    print(f"\n=== AUC Verification ===")
-    print(f"Predicted ROC AUC: {avg_roc_auc:.4f}")
-    print(f"CSV ROC AUC: {csv_roc_auc:.4f}")
-    print(f"Predicted PR AUC: {avg_pr_auc:.4f}")
-    print(f"CSV PR AUC: {csv_pr_auc:.4f}")
-    print(f"Difference ROC: {abs(avg_roc_auc - csv_roc_auc):.4f}")
-    print(f"Difference PR: {abs(avg_pr_auc - csv_pr_auc):.4f}")

@@ -42,11 +42,7 @@ class TestbedDataset(InMemoryDataset):
         if not os.path.exists(self.processed_dir):
             os.makedirs(self.processed_dir)
 
-    # Customize the process method to fit the task of drug-target affinity prediction
-    # Inputs:
-    # XD - list of SMILES, XT: list of encoded target (categorical or one-hot),
-    # Y: list of labels (i.e. affinity)
-    # Return: PyTorch-Geometric format processed data
+  
     def process(self, xd, xt, y, xg, z, smile_graph, index):
         count=0
 
@@ -55,21 +51,15 @@ class TestbedDataset(InMemoryDataset):
         data_len = len(xd)
 
         for i in range(data_len):
-            #('Converting SMILES to graph: {}/{}'.format(i+1, data_len))
             smiles = xd[i]
             target = xt[i]
             labels = y[i]
             seqdrug=z[i]
-            # 首先解析 gene 的内容为数值数组
-
-
             gene=xg[i]
 
             row_indices=index['rows']
             col_indices=index['cols']
-            # convert SMILES to molecular representation using rdkit
             c_size, features, edge_index = smile_graph[smiles]
-            # make the graph ready for PyTorch Geometrics GCN algorithms:
             if len(edge_index) == 0:
                 count=count+1
                 print(f'No edges for graph {i + 1}, skipping...',smiles)
@@ -88,7 +78,6 @@ class TestbedDataset(InMemoryDataset):
             GCNData.__setitem__('seqdrug', torch.FloatTensor([seqdrug]))
             GCNData.__setitem__('row_indices', torch.LongTensor([row_indices[i]]))
             GCNData.__setitem__('col_indices', torch.LongTensor([col_indices[i]]))
-            # append graph, label and target sequence to data list
             data_list.append(GCNData)
         print("去除不规则数量", count, "总数量为", data_len)
 
@@ -120,12 +109,9 @@ def laplacian_norm(adj):
     return norm_A
 
 def lalacians_norm(adj):
-    # adj += np.eye(adj.shape[0]) # add self-loop
-    # 对于非方阵，我们需要分别计算行和列的度数
     row_degree = np.array(adj.sum(1))
     col_degree = np.array(adj.sum(0))
     
-    # 计算行度数的逆平方根
     D_row = []
     for i in range(len(row_degree)):
         if row_degree[i] != 0:
@@ -135,7 +121,6 @@ def lalacians_norm(adj):
             D_row.append(0)
     D_row = np.diag(np.array(D_row))
     
-    # 计算列度数的逆平方根
     D_col = []
     for i in range(len(col_degree)):
         if col_degree[i] != 0:
@@ -144,8 +129,6 @@ def lalacians_norm(adj):
         else:
             D_col.append(0)
     D_col = np.diag(np.array(D_col))
-    
-    # 对非方阵进行归一化: D_row^(-1/2) * A * D_col^(-1/2)
     norm_A = D_row.dot(adj).dot(D_col)
     return norm_A
 

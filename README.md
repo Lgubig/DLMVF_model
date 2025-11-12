@@ -1,4 +1,4 @@
-# Readme
+# DLMVF
 
 DLMVF: A deep learning framework based on multi-view fusion for inferring miRNA-drug association. The model integrates various data sources, including drug SMILES sequences, drug molecular graphs, miRNA sequences, gene expression data, and miRNA-drug interactions.
 

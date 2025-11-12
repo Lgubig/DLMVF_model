@@ -5,7 +5,6 @@ from torch_geometric.nn import GCNConv, global_max_pool as gmp
 
 
 class Attention(nn.Module):
-    """Scaled attention over a set of vectors (batch, n_items, feat) -> (batch, feat)"""
     def __init__(self, feat_in, hidden=16):
         super().__init__()
         self.project = nn.Sequential(
@@ -15,7 +14,6 @@ class Attention(nn.Module):
         )
 
     def forward(self, x):
-        # x: (B, N, F)
         scores = self.project(x)               # (B, N, 1)
         weights = torch.softmax(scores, dim=1) # (B, N, 1)
         out = (weights * x).sum(dim=1)         # (B, F)
@@ -23,7 +21,6 @@ class Attention(nn.Module):
 
 
 class DenseEncoder(nn.Module):
-    """Simple two-layer MLP encoder with BN and dropout"""
     def __init__(self, in_dim, out_dim, hidden=256, dropout=0.2):
         super().__init__()
         self.net = nn.Sequential(
@@ -39,13 +36,11 @@ class DenseEncoder(nn.Module):
 
 
 class Conv1DMultiScale(nn.Module):
-    """Multi-kernel 1D CNN branch for sequence data."""
     def __init__(self, embed_dim, n_filters, out_dim, dropout=0.2):
         super().__init__()
         self.dropout_rate = dropout
 
         def make_path(kernel_size):
-            # We add padding to maintain sequence length after convolution
             padding = kernel_size // 2
             return nn.Sequential(
                 nn.Conv1d(embed_dim, n_filters * 2, kernel_size=kernel_size, padding=padding),
@@ -63,8 +58,6 @@ class Conv1DMultiScale(nn.Module):
         self.fc_proj = nn.Linear(n_filters * 4, out_dim)
 
     def forward(self, embedded_seq):
-        # embedded_seq shape: (B, E, L)
-
         p1 = self.path_k4(embedded_seq)
         p1 = F.max_pool1d(p1, p1.size(2)).squeeze(2)
         p1 = self.fc_proj(p1)
@@ -77,12 +70,10 @@ class Conv1DMultiScale(nn.Module):
         p3 = F.max_pool1d(p3, p3.size(2)).squeeze(2)
         p3 = self.fc_proj(p3)
 
-        # Concatenate along feature dimension -> (B, out_dim * 3)
         return torch.cat([p1, p2, p3], dim=1)
 
 
 class GCNEncoder(nn.Module):
-    """Two-layer GCN followed by FC projection. Returns pooled graph feature (batch-level)."""
     def __init__(self, in_dim, hidden_dim, proj_dim, dropout=0.2):
         super().__init__()
         self.conv1 = GCNConv(in_dim, hidden_dim)
@@ -106,7 +97,6 @@ class GCNEncoder(nn.Module):
 
 
 class MDGraphEncoder(nn.Module):
-    """Encoder for miRNA-drug bipartite graph returning node-level features."""
     def __init__(self, in_dim=256, mid_dim=128, out_dim=64, fc_mid=128, proj_dim=256, dropout=0.2):
         super().__init__()
         self.gcn1 = GCNConv(in_dim, mid_dim)
@@ -129,7 +119,6 @@ class MDGraphEncoder(nn.Module):
 
 
 class DLMVF(nn.Module):
-    """Refactored multi-branch model."""
     def __init__(self, n_output=1, n_filters=32, embed_dim=128, num_smiles_chars=66,
                  num_drug_node_feats=78, num_mirna_chars=25, proj_dim=256, dropout=0.2, drug_offset=1563):
         super().__init__()
@@ -138,7 +127,6 @@ class DLMVF(nn.Module):
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
 
-        # --- Feature Encoders ---
         self.smiles_embedding = nn.Embedding(num_smiles_chars + 1, embed_dim)
         self.smiles_encoder = Conv1DMultiScale(embed_dim, n_filters, proj_dim, dropout)
         self.smiles_reduce = nn.Conv1d(proj_dim * 3, proj_dim, kernel_size=1)
@@ -153,7 +141,6 @@ class DLMVF(nn.Module):
 
         self.md_graph_encoder = MDGraphEncoder(in_dim=256, proj_dim=proj_dim, dropout=dropout)
 
-        # --- Fusion and Classifier ---
         self.attention = Attention(proj_dim)
         self.classifier_fc = nn.Sequential(
             nn.Linear(proj_dim * 2, 256),
@@ -164,43 +151,37 @@ class DLMVF(nn.Module):
         )
 
     def forward(self, drug_graph_data, bipartite_graph_data):
-        # -- 1. Drug Graph Features (GCN)
         drug_graph_feat = self.drug_graph_encoder(drug_graph_data.x, drug_graph_data.edge_index, drug_graph_data.batch)
 
-        # -- 2. Drug SMILES Sequence Features (CNN)
         smiles_seq = drug_graph_data.seqdrug.long()
         smiles_embedding = self.smiles_embedding(smiles_seq).permute(0, 2, 1)
         smiles_multi_feat = self.smiles_encoder(smiles_embedding)
         smiles_seq_feat = self.smiles_reduce(smiles_multi_feat.unsqueeze(2)).squeeze(2)
 
-        # -- 3. Gene Features (DNN)
         gene_feat = self.gene_encoder(drug_graph_data.gene.float())
 
-        # -- 4. miRNA Sequence Features (CNN)
         mirna_seq = drug_graph_data.target.long()
         mirna_embedding = self.mirna_embedding(mirna_seq).permute(0, 2, 1)
         mirna_multi_feat = self.mirna_encoder(mirna_embedding)
         mirna_seq_feat = self.mirna_reduce(mirna_multi_feat.unsqueeze(2)).squeeze(2)
 
-        # -- 5. miRNA-Drug Bipartite Graph Features (GCN)
+     
         md_node_feats = self.md_graph_encoder(bipartite_graph_data.x, bipartite_graph_data.edge_index)
         rna_md_feat = md_node_feats[drug_graph_data.row_indices, :]
         drug_md_feat = md_node_feats[drug_graph_data.col_indices + self.drug_offset, :]
 
-        # --- Feature Fusion ---
-        # Fuse drug features with attention
+      
         drug_feature_stack = torch.stack([smiles_seq_feat, drug_graph_feat, drug_md_feat], dim=1)
         drug_emb, _ = self.attention(drug_feature_stack)
         drug_emb = self.dropout(drug_emb)
 
-        # Fuse miRNA features with attention
         mirna_feature_stack = torch.stack([gene_feat, rna_md_feat, mirna_seq_feat], dim=1)
         mirna_emb, _ = self.attention(mirna_feature_stack)
         mirna_emb = self.dropout(mirna_emb)
 
-        # --- Final Classification ---
         combined_features = torch.cat([drug_emb, mirna_emb], dim=1)
         output = self.classifier_fc(combined_features)
 
         return output
+
 
